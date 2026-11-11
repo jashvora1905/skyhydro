@@ -1,72 +1,132 @@
-# MDRIIA Group 08 · SkyHydro: Vision-Guided Multirotor UAV for Last-Mile Flood Relief Delivery
+# SkyHydro
 
-**Course:** Modern Day Robotics and Its Industrial Applications (MDRIIA, 702CO0E012) · B.Tech CSBS · SVKM's NMIMS MPSTME · AY 2026–27
-**Team:** Manikya Rathore (E056) · Shourya Garg (E020) · Keswani Laksh (E032) · Vora Jash (E067)
+**A MuJoCo simulation for vision-guided UAV flood-relief delivery.**
 
-> *To what extent can an autonomous vision-guided multirotor UAV simulated in MuJoCo for payload-range trade-offs optimize last-mile medical relief drop accuracy during NDRF flood operations while establishing fleet utilization payback parity against ground transport?*
+SkyHydro studies a practical question: can a multirotor deliver a suspended medical payload more accurately in crosswind, and can a learned pilot complete a multi-stop flood-valley mission efficiently?
 
-The technical dossier is in [`docs/MDRIIA_Group_08_Technical_Dossier.pdf`](docs/).
+[Watch the project showcase](https://lnkd.in/p/dwu8AHcT) · [Read the technical dossier](docs/MDRIIA_Group_08_Technical_Dossier.pdf) · [Explore the implementation](#project-map)
 
-## Videos
+![SkyHydro flood-relief simulation preview](docs/figures/video_poster.png)
 
-| Video | Link |
-|---|---|
-| LinkedIn showcase (all four members, 3:45) | https://lnkd.in/p/dwu8AHcT |
-| Background simulation only, Full HD 1080p, no voice-over (3:45) | https://drive.google.com/file/d/1WLYJijy1D3bz0LdORWOzSMSYkpFt4-Bg/view?usp=sharing |
+> **Research prototype:** all flight and delivery results in this repository are simulated in MuJoCo. They are not evidence of real-world UAV performance or operational readiness.
 
-The background video was rendered from this repository: the valley clips from `simulate.py`'s scene with the stage-3 RL pilot replay (`results/stage3/replay.json`), the drop clips from `src/flood_relief_drop_sim.py` (proposed at 10 m/s, baseline at 15 m/s, `--battery-soc 0.27` abort), and the graphs from `analytics/`. The spoken script and cues are in [`docs/LINKEDIN_VIDEO_SCRIPT.md`](docs/LINKEDIN_VIDEO_SCRIPT.md).
+## Highlights
 
-## What is in this folder
+- **Payload-aware delivery:** a downward camera measurement tracks the suspended canister relative to the target; the controller damps swing and waits for a stable release window.
+- **Wind-stressed trials:** 240 seeded simulations compare a waypoint baseline and the proposed controller across 0, 5, 10, and 15 m/s crosswinds.
+- **Multi-stop valley demo:** a PPO pilot trained in stages completes simulated four-house missions in the flood-valley scene.
+- **Reproducible analysis:** per-run data, telemetry, statistical summaries, evaluation scripts, and trained model checkpoints are included.
 
-| Path | What it is | Dossier |
-|---|---|---|
-| `models/skyhydro_flood_uav.xml` | MJCF drop-trial model: official airframe and masses, 4 rotor motors on their own sites (differential thrust + drag torque), 2-DOF cable pendulum + winch, releasable canister, rooftop target. Timestep 0.002 s (500 Hz), RK4. | §2 |
-| `src/flood_relief_drop_sim.py` | Closed-loop controller: FSM `TAKEOFF → CRUISE → APPROACH_DROP_ZONE → HOVER → WINCH_LOWER → RELEASE → WINCH_UP → RETURN_TO_BASE` (+ `ABORT`), cascaded PID + geometric attitude control, wind/gust model, Monte Carlo runner, 500 Hz logger, viewer | §2, §4 |
-| `analytics/flood_relief_real_trials.csv` | **Our results**: 240 MuJoCo runs (2 controllers × 4 crosswinds × 30 runs), one row per run with its seed | §4 |
-| `analytics/telemetry/*.csv.gz` | 500 Hz logs (time, FSM state, pose, reference, velocity, canister, swing, cable length, wind, 4 rotor thrusts, power) | §4 |
-| `analytics/analyze_trials.py` | Welch t-test, Cohen's d, 95 % CI, CEP, success rates → `trial_stats.json`, `docs/figures/fig_boxplot.png`, `fig_trajectory.png` | §4 |
-| `analytics/disaster_relief_logistics.py` | CSBS model (dimensionless): H_reclaimed, κ / NCRI, P_payback, M/M/c queue, FMEA, ±30 % tornado + break-even → `business_results.json`, `fig_business_*.png` | §3 |
-| `environment/`, `rl/`, `simulate.py` | Full 3D flood valley (terrain, two towns, survivors, animated flood water, debris, helicopter) and the RL pilot (PPO, Stable-Baselines3, curriculum stages 1–3) | expo demo |
-| `results/stage1-3/` | Trained RL pilots (`model.zip`) + `training_summary.json` + `replay.json` | expo demo |
-| `analytics/evaluate_rl_pilot.py`, `rl_pilot_real_trials.csv` | Stage-3 RL pilot vs scripted expert, 30 full missions each (same seeds): RL 30/30, 150 s vs 309 s | expo demo |
-| `analytics/SIMULATED_*`, `generate_paper_figures.py`, `docs/figures/figure*.png` | Course starter files with **generated target numbers**. Not used for any result. | — |
+## Results
 
-## Run it (fresh clone)
+### Drop-trial controller
 
-```bash
-# Windows: setup_windows.bat     Linux/macOS: ./setup_linux.sh      (venv, CUDA PyTorch, deps, builds the valley, tests)
-pip install -r requirements.txt            # if you set up the environment yourself
+Each condition contains 30 runs. “Success” means the canister landed in the target roof zone. At high wind, a conservative abort is counted separately from a delivery.
 
-# 1. the drop-trial model loads
-python -c "import mujoco; mujoco.MjModel.from_xml_path('models/skyhydro_flood_uav.xml')"
+| Crosswind | Waypoint baseline | Vision-guided controller |
+|---:|---:|---:|
+| 0 m/s | 30/30 delivered | 30/30 delivered |
+| 5 m/s | 30/30 delivered | 30/30 delivered |
+| 10 m/s | 8/30 delivered | 23/30 delivered; 7 aborted safely |
+| 15 m/s | 0/30 delivered; 19 missed into water, 11 not released | 17/30 delivered; 12 aborted safely, 1 landed outside the zone |
 
-# 2. watch one drop (FSM state shown in the viewer: text overlay + status-light colour)
-python src/flood_relief_drop_sim.py --view                                # proposed controller, 10 m/s crosswind
-python src/flood_relief_drop_sim.py --view --controller baseline --wind 15   # baseline misses
-python src/flood_relief_drop_sim.py --view --battery-soc 0.27              # handled failure: battery-reserve ABORT
+The proposed controller’s strongest practical difference is at 10–15 m/s: it uses canister-relative feedback and a release gate, reducing off-target releases while increasing delivery success in these simulated conditions. See the [trial data](analytics/flood_relief_real_trials.csv), [analysis](analytics/analyze_trials.py), and [summary statistics](analytics/trial_stats.json).
 
-# 3. Monte Carlo trials -> statistics -> business model (re-creates every number in the dossier)
-python src/flood_relief_drop_sim.py --trials 30                           # 240 runs, ~15-60 min depending on CPU
-python analytics/analyze_trials.py
-python analytics/disaster_relief_logistics.py
+### Learned valley pilot
 
-# 4. re-create the 500 Hz log of any run from its seed
-python src/flood_relief_drop_sim.py --trials 30 --replay-run 137 --telemetry run137.csv
+On 30 paired, same-seed four-house missions, both pilots completed all missions. The stage-3 PPO pilot averaged **150.2 s** per mission versus **309.0 s** for the scripted expert. The expert kept average canister swing lower (**2.3°** versus **8.9°**), so the learned policy trades steadier payload motion for faster missions in this evaluation.
 
-# 5. full valley + trained RL pilot (expo)
-python analytics/evaluate_rl_pilot.py --episodes 30   # RL vs expert, 60 missions (~25-60 min)
-sim.bat            # or: python simulate.py          (survey scan, then the trained pilot supplies the houses)
-sim.bat --replay   # replay the recorded test missions from results/
-train.bat          # retrain stages 1 -> 3 on the GPU (results saved to results/ automatically)
+See the [evaluation data](analytics/rl_pilot_real_trials.csv) and [results notes](results/README.md).
+
+## Try it
+
+### Requirements
+
+- 64-bit Python 3.10–3.12
+- MuJoCo and the Python packages in [requirements.txt](requirements.txt)
+- A GPU is useful for training; viewing the included trained policy and replaying missions can run without training a new model.
+
+### Install
+
+**Windows**
+
+```bat
+setup_windows.bat
 ```
 
-## Data provenance
+**Linux**
 
-Every number in dossier §4 comes from `analytics/flood_relief_real_trials.csv`, produced by `src/flood_relief_drop_sim.py` running MuJoCo. Every economic input in §3 is either computed from those trials or is a labelled assumption that is varied in the sensitivity graph. Nothing is taken from the `SIMULATED_*` starter files.
+```bash
+./setup_linux.sh
+```
 
-## Honest limits
+Or install dependencies in an existing Python environment:
 
-* Wind is a quadratic-drag force with first-order Gauss–Markov gusts (Dryden-like), not CFD; rotor downwash on the canister is not modelled.
-* "Vision" is a simulated downward-camera measurement of the canister relative to the marker (5 cm noise, 30 Hz). There is no image-processing model.
-* In the valley demo, the survey scan is a scripted flight that reads each house's survivor count from the scene; the RL pilot learned the pickup and delivery runs, not the scan.
-* Cost figures are ratios to one boat-hour; most inputs are assumptions (see `ASSUME` in the business script) and are varied ±30 %.
+```bash
+python -m pip install -r requirements.txt
+```
+
+### Run a simulation
+
+Watch the full flood-valley mission:
+
+```bash
+python simulate.py
+```
+
+Replay recorded missions:
+
+```bash
+python simulate.py --replay
+```
+
+Watch a single payload-drop trial:
+
+```bash
+python src/flood_relief_drop_sim.py --view
+```
+
+Compare the waypoint baseline in a 15 m/s crosswind:
+
+```bash
+python src/flood_relief_drop_sim.py --view --controller baseline --wind 15
+```
+
+Run the full controller experiment and regenerate its analyses:
+
+```bash
+python src/flood_relief_drop_sim.py --trials 30
+python analytics/analyze_trials.py
+python analytics/disaster_relief_logistics.py
+```
+
+The Monte Carlo experiment takes roughly 15–60 minutes, depending on the computer. To evaluate the trained pilot against the scripted expert:
+
+```bash
+python analytics/evaluate_rl_pilot.py --episodes 30
+```
+
+## Project map
+
+| Path | Purpose |
+|---|---|
+| `src/flood_relief_drop_sim.py` | Drop mission, controllers, wind model, Monte Carlo runner, and telemetry |
+| `models/skyhydro_flood_uav.xml` | MuJoCo UAV, rotors, suspended payload, winch, and target |
+| `environment/`, `rl/`, `simulate.py` | Flood-valley scene, Gymnasium environment, pilot, and interactive viewer |
+| `results/stage1-3/` | Trained policies, summaries, and mission replays |
+| `analytics/` | Trial data, statistical analysis, and logistics model |
+| `docs/` | Technical dossier, figures, and supporting research notes |
+
+## Model scope and limitations
+
+- Wind uses quadratic drag with first-order Gauss–Markov gusts; it is not a CFD model.
+- The simulated downward camera provides a noisy target-relative measurement. The project does not implement image recognition from camera pixels.
+- The valley demo’s survey scan is scripted and reads survivor counts from the scene; the learned pilot controls pickup and delivery missions.
+- The logistics model is exploratory. Several inputs are assumptions, not measured costs; inspect the sensitivity analysis before drawing economic conclusions.
+- Results depend on the simulator, controller, model parameters, and chosen test conditions. They do not establish safe or effective real-world performance.
+
+## Project context
+
+Built by MDRIIA Group 08 at NMIMS MPSTME as a 2026–27 robotics course project. The repository includes work by Manikya Rathore, Shourya Garg, Keswani Laksh, and Jash Vora.
+
+For system design, assumptions, and detailed methodology, see the [technical dossier](docs/MDRIIA_Group_08_Technical_Dossier.pdf) and [research and implementation guide](RESEARCH_AND_IMPLEMENTATION_GUIDE.md).
